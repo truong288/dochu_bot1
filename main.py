@@ -200,7 +200,7 @@ if __name__ == "__main__":
 
     # Thiết lập webhook
    
-    if __name__ == "__main__":
+if __name__ == "__main__":
     TOKEN = os.environ.get("BOT_TOKEN")
     DOMAIN = "https://dochu-bot1.onrender.com"
     WEBHOOK_PATH = "/webhook"
