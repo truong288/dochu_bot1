@@ -4,6 +4,8 @@ from flask import Flask, request
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from telegram.ext._contexttypes import ContextTypes
+import re
+
 TOKEN = os.environ.get("BOT_TOKEN")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 
@@ -203,6 +205,11 @@ def webhook():
 def set_webhook():
     webhook_url = os.environ.get("WEBHOOK_URL")
     application.bot.set_webhook(webhook_url)
+
+# Thêm route cho trang chủ
+@app.route("/")
+def index():
+    return "Bot đang chạy!"
 
 if __name__ == "__main__":
     application.add_handler(CommandHandler("startgame", start_game))
