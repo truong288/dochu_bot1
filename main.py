@@ -209,7 +209,7 @@ def webhook():
         asyncio.run(application.process_update(update))
     except Exception as e:
         print("Webhook Error:", e)
-        import traceback
+        traceback.print_exc()
         traceback.print_exc()
         return 'error', 500
     return 'ok', 200
