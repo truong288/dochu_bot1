@@ -1,13 +1,14 @@
 import os
-import re
-import asyncio
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
-from flask import Flask, request
 import logging
+from flask import Flask, request
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from telegram.ext._contexttypes import ContextTypes
 
 # === CẤU HÌNH LOG ===
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                    level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # === TRẠNG THÁI GAME ===
 players = []
@@ -177,6 +178,19 @@ async def win_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # === KHỞI CHẠY WEBHOOK ===
 app = Flask(__name__)
 
+app = Flask(__name__)
+
+# Khởi tạo Telegram bot application
+application = Application.builder().token(os.environ.get("BOT_TOKEN")).build()
+
+# Định nghĩa các hàm xử lý command
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Bot đã sẵn sàng!")
+
+# Thêm handler cho command /start
+application.add_handler(CommandHandler("start", start))
+
+# Định nghĩa route cho webhook
 @app.route("/webhook", methods=["POST"])
 def webhook():
     json_str = request.get_data().decode("UTF-8")
@@ -184,10 +198,16 @@ def webhook():
     application.update_queue.put(update)
     return 'ok', 200
 
+# Thiết lập webhook khi ứng dụng Flask bắt đầu
+@app.before_first_request
+def set_webhook():
+    webhook_url = os.environ.get("WEBHOOK_URL")
+    application.bot.set_webhook(webhook_url)
+
 if __name__ == "__main__":
     TOKEN = os.environ.get("BOT_TOKEN")
     DOMAIN = "https://dochu-bot1.onrender.com"
-    PORT = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
 
     application = Application.builder().token(TOKEN).build()
     application.add_handler(CommandHandler("startgame", start_game))
