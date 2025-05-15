@@ -1,13 +1,12 @@
 import os
 import logging
-import re
-import asyncio
 from flask import Flask, request
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from telegram.ext._contexttypes import ContextTypes
+import asyncio
+import re
 
-# Lấy TOKEN và WEBHOOK_URL từ biến môi trường
 TOKEN = os.environ.get("BOT_TOKEN")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 
@@ -28,6 +27,9 @@ win_counts = {}
 
 BAD_WORDS = {"đần", "bần", "ngu", "ngốc", "bò", "dốt", "nát", "chó", "địt", "mẹ", "mày", "má"}
 
+VALID_PHRASES = ["trời nắng", "nắng hạ", "hạ nhiệt", "nhiệt đới", "đới khí", "khí hậu", "hậu quả", "quả táo"]
+
+# === RESET GAME ===
 def reset_game():
     global players, current_phrase, used_phrases, current_player_index, in_game, waiting_for_phrase, turn_timeout_task
     players = []
@@ -40,11 +42,17 @@ def reset_game():
         turn_timeout_task.cancel()
         turn_timeout_task = None
 
+# === KIỂM TRA ===
 def is_vietnamese(text):
     return bool(re.search(r'[àáạảãâầấậẩẫăắặẳẵêèéẹẻẽềếệểễìíịỉĩòóọỏõôồốộổỗơớợởỡùúụủũưứựửữỳýỵỷỹđ]', text))
 
 def contains_bad_word(phrase):
+    """Kiểm tra xem cụm từ có chứa từ tiêu cực hay không."""
     return any(bad in phrase.split() for bad in BAD_WORDS)
+
+def is_valid_phrase(phrase):
+    """Kiểm tra xem cụm từ nối có hợp lý hay không."""
+    return phrase in VALID_PHRASES
 
 # === HANDLERS ===
 async def start_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -98,6 +106,9 @@ async def play_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not waiting_for_phrase and words[0] != current_phrase.split()[-1]:
         await eliminate_player(update, context, "Không đúng từ nối.")
         return
+    if not is_valid_phrase(text):
+        await eliminate_player(update, context, "Cụm từ nối không hợp lệ.")
+        return
 
     used_phrases[text] = 1
     current_phrase = text
@@ -128,6 +139,10 @@ async def eliminate_player(update, context, reason):
     elif eliminated_index == current_player_index and current_player_index >= len(players):
         current_player_index = 0
 
+    # Thông báo số người chơi còn lại
+    if len(players) > 1:
+        await update.message.reply_text(f"🔴 Người chơi còn lại: {len(players)}")
+    
     if len(players) == 1:
         await declare_winner(context, players[0])
     else:
@@ -185,31 +200,28 @@ async def win_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
 app = Flask(__name__)
 
 # Khởi tạo Telegram bot application
-application = Application.builder().token(os.environ.get("BOT_TOKEN")).build()
+application = Application.builder().token(TOKEN).build()
+
+# Định nghĩa các hàm xử lý command
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Bot đã sẵn sàng!")
+
+# Thêm handler cho command /start
+application.add_handler(CommandHandler("start", start))
 
 # Định nghĩa route cho webhook
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    try:
-        json_str = request.get_data().decode("UTF-8")
-        update = Update.de_json(json_str, application.bot)
-        application.update_queue.put(update)
-        logger.debug("Successfully processed webhook")
-        return 'ok', 200
-    except Exception as e:
-        logger.error(f"Error processing webhook: {e}")
-        return "Internal Server Error", 500
+    json_str = request.get_data().decode("UTF-8")
+    update = Update.de_json(json_str, application.bot)
+    application.update_queue.put(update)
+    return 'ok', 200
 
 # Thiết lập webhook khi ứng dụng Flask bắt đầu
 @app.before_first_request
 def set_webhook():
     webhook_url = os.environ.get("WEBHOOK_URL")
-    logger.debug(f"Setting webhook to: {webhook_url}")  # Log URL để kiểm tra
-    try:
-        application.bot.set_webhook(webhook_url)
-        logger.info("Webhook set successfully")
-    except Exception as e:
-        logger.error(f"Error setting webhook: {e}")
+    application.bot.set_webhook(webhook_url)
 
 if __name__ == "__main__":
     application.add_handler(CommandHandler("startgame", start_game))
