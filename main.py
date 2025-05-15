@@ -2,13 +2,9 @@ import os
 import re
 import asyncio
 from telegram import Update
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    ContextTypes,
-    filters,
-)
+from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+from flask import Flask, request
+import logging
 
 # === TRẠNG THÁI GAME ===
 players = []
@@ -203,6 +199,7 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("win", win_leaderboard))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, play_word))
 
+    # Thiết lập webhook
     app.run_webhook(
         listen="0.0.0.0",
         port=int(os.environ.get("PORT", 5000)),
