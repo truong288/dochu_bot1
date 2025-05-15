@@ -205,11 +205,6 @@ def set_webhook():
     application.bot.set_webhook(webhook_url)
 
 if __name__ == "__main__":
-    TOKEN = os.environ.get("BOT_TOKEN")
-    DOMAIN = "https://dochu-bot1.onrender.com"
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
-
-    application = Application.builder().token(TOKEN).build()
     application.add_handler(CommandHandler("startgame", start_game))
     application.add_handler(CommandHandler("join", join_game))
     application.add_handler(CommandHandler("begin", begin_game))
@@ -217,9 +212,4 @@ if __name__ == "__main__":
     application.add_handler(CommandHandler("win", win_leaderboard))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, play_word))
 
-    # Thiết lập webhook
-    application.run_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        webhook_url=f"{DOMAIN}/webhook"
-    )
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
