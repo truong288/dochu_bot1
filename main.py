@@ -207,13 +207,14 @@ def webhook():
     try:
         data = request.get_json(force=True)
         update = Update.de_json(data, application.bot)
-        # Xử lý update đúng cách
-        asyncio.get_event_loop().create_task(application.update_queue.put(update))
+        # Dùng asyncio.run để xử lý đúng trong thread của Flask
+        asyncio.run(application.update_queue.put(update))
     except Exception as e:
         print("Webhook Error:", e)
         traceback.print_exc()
         return 'error', 500
     return 'ok', 200
+
 
 # Thiết lập webhook khi app khởi chạy lần đầu
 @app.before_first_request
@@ -231,7 +232,7 @@ application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, play_wor
 
 # Chạy Flask app
 if __name__ == "__main__":
-    asyncio.run(application.initialize())  # <- Thêm dòng này trước khi app.run()
-
+    asyncio.run(application.initialize())  # Đảm bảo Application được khởi tạo
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+
 
