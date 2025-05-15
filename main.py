@@ -214,9 +214,10 @@ def webhook():
         update = Update.de_json(data, application.bot)
         asyncio.run(application.process_update(update))
     except Exception as e:
-        print("Webhook error:", e)
+        print("Webhook error:", e)  # In chi tiết lỗi tại đây để debug
         return 'error', 500
     return 'ok', 200
+
 
 @app.before_first_request
 def init_webhook():
