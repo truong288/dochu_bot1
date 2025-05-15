@@ -3,6 +3,7 @@ import re
 import asyncio
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+from flask import Flask, request
 import logging
 
 # === CẤU HÌNH LOG ===
@@ -174,21 +175,30 @@ async def win_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(result)
 
 # === KHỞI CHẠY WEBHOOK ===
+app = Flask(__name__)
+
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    json_str = request.get_data().decode("UTF-8")
+    update = Update.de_json(json_str, application.bot)
+    application.update_queue.put(update)
+    return 'ok', 200
+
 if __name__ == "__main__":
     TOKEN = os.environ.get("BOT_TOKEN")
     DOMAIN = "https://dochu-bot1.onrender.com"
     PORT = int(os.environ.get("PORT", 10000))
 
-    app = Application.builder().token(TOKEN).build()
+    application = Application.builder().token(TOKEN).build()
+    application.add_handler(CommandHandler("startgame", start_game))
+    application.add_handler(CommandHandler("join", join_game))
+    application.add_handler(CommandHandler("begin", begin_game))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("win", win_leaderboard))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, play_word))
 
-    app.add_handler(CommandHandler("startgame", start_game))
-    app.add_handler(CommandHandler("join", join_game))
-    app.add_handler(CommandHandler("begin", begin_game))
-    app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CommandHandler("win", win_leaderboard))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, play_word))
-
-    app.run_webhook(
+    # Thiết lập webhook
+    application.run_webhook(
         listen="0.0.0.0",
         port=PORT,
         webhook_url=f"{DOMAIN}/webhook"
