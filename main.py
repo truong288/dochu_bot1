@@ -6,6 +6,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from telegram.ext._contexttypes import ContextTypes
 import asyncio
 import re
+import json
 
 TOKEN = os.environ.get("BOT_TOKEN")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
@@ -210,12 +211,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 application.add_handler(CommandHandler("start", start))
 
 # Định nghĩa route cho webhook
+import json  # Thêm dòng này ở đầu file
+
 @app.route('/webhook', methods=['POST'])
 def webhook():
     json_str = request.get_data().decode('UTF-8')
-    update = Update.de_json(json_str, application.bot)
+    data = json.loads(json_str)  # Chuyển từ string -> dict
+    update = Update.de_json(data, application.bot)
     asyncio.run(application.process_update(update))
     return 'ok'
+
 
 # Thiết lập webhook khi ứng dụng Flask bắt đầu
 @app.before_first_request
