@@ -1,3 +1,3 @@
-flask
-python-telegram-bot[webhooks]==20.7
-aiohttp
+Flask==2.1.2
+python-telegram-bot==20.0
+gunicorn==20.1.0
