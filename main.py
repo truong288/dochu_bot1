@@ -1,5 +1,6 @@
 import os
 import logging
+import traceback
 from flask import Flask, request
 from telegram import Update, Bot
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
