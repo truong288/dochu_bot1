@@ -1,21 +1,19 @@
 import os
 import logging
-import asyncio
-import json
-import re
-
 from flask import Flask, request
 from telegram import Update, Bot
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from telegram.ext._contexttypes import ContextTypes
+import asyncio
+import re
 
-# === CẤU HÌNH LOG ===
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# === LẤY TOKEN & URL TỪ MÔI TRƯỜNG ===
 TOKEN = os.environ.get("BOT_TOKEN")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
+
+# === CẤU HÌNH LOG ===
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                    level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # === TRẠNG THÁI GAME ===
 players = []
@@ -28,7 +26,6 @@ turn_timeout_task = None
 win_counts = {}
 
 BAD_WORDS = {"đần", "bần", "ngu", "ngốc", "bò", "dốt", "nát", "chó", "địt", "mẹ", "mày", "má"}
-VALID_PHRASES = ["trời nắng", "nắng hạ", "hạ nhiệt", "nhiệt đới", "đới khí", "khí hậu", "hậu quả", "quả táo"]
 
 # === RESET GAME ===
 def reset_game():
@@ -51,7 +48,7 @@ def contains_bad_word(phrase):
     return any(bad in phrase.split() for bad in BAD_WORDS)
 
 def is_valid_phrase(phrase):
-    return phrase in VALID_PHRASES
+    return True  # Cho phép bất kỳ cụm 2 từ
 
 # === HANDLERS ===
 async def start_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -140,6 +137,7 @@ async def eliminate_player(update, context, reason):
 
     if len(players) > 1:
         await update.message.reply_text(f"🔴 Người chơi còn lại: {len(players)}")
+    
     if len(players) == 1:
         await declare_winner(context, players[0])
     else:
@@ -193,23 +191,16 @@ async def win_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         result += f"{i}. {chat.first_name}: {count} lần\n"
     await update.message.reply_text(result)
 
-# === KHỞI TẠO APP ===
+# === KHỞI CHẠY FLASK VÀ TELEGRAM APP ===
 app = Flask(__name__)
 application = Application.builder().token(TOKEN).build()
+
+# Route mặc định để tránh lỗi 404
 @app.route("/")
 def index():
     return "Bot is running!"
 
-# === ĐĂNG KÝ HANDLERS ===
-application.add_handler(CommandHandler("start", help_command))
-application.add_handler(CommandHandler("startgame", start_game))
-application.add_handler(CommandHandler("join", join_game))
-application.add_handler(CommandHandler("begin", begin_game))
-application.add_handler(CommandHandler("help", help_command))
-application.add_handler(CommandHandler("win", win_leaderboard))
-application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, play_word))
-
-# === FLASK WEBHOOK ===
+# Route webhook nhận dữ liệu từ Telegram
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
@@ -217,15 +208,26 @@ def webhook():
         update = Update.de_json(data, application.bot)
         asyncio.run(application.process_update(update))
     except Exception as e:
-        print("Webhook Error:", e)  # In lỗi ra console
+        print("Webhook Error:", e)
         import traceback
-        traceback.print_exc()       # In toàn bộ lỗi stack trace
+        traceback.print_exc()
         return 'error', 500
     return 'ok', 200
 
+# Thiết lập webhook khi app khởi chạy lần đầu
 @app.before_first_request
-def init_webhook():
-    asyncio.run(application.bot.set_webhook(WEBHOOK_URL))
+def set_webhook():
+    application.bot.set_webhook(WEBHOOK_URL)
 
+# Đăng ký các handlers
+application.add_handler(CommandHandler("start", start_game))
+application.add_handler(CommandHandler("startgame", start_game))
+application.add_handler(CommandHandler("join", join_game))
+application.add_handler(CommandHandler("begin", begin_game))
+application.add_handler(CommandHandler("help", help_command))
+application.add_handler(CommandHandler("win", win_leaderboard))
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, play_word))
+
+# Chạy Flask app
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
