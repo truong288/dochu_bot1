@@ -210,12 +210,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 application.add_handler(CommandHandler("start", start))
 
 # Định nghĩa route cho webhook
-@app.route("/webhook", methods=["POST"])
+@app.route('/webhook', methods=['POST'])
 def webhook():
-    json_str = request.get_data().decode("UTF-8")
-    update = Update.de_json(json_str, application.bot)
-    application.update_queue.put(update)
-    return 'ok', 200
+    json_str = request.get_data().decode('UTF-8')
+    update = telegram.Update.de_json(json_str, bot)
+    dispatcher.process_update(update)
+    return 'ok'
+
 
 # Thiết lập webhook khi ứng dụng Flask bắt đầu
 @app.before_first_request
