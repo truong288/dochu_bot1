@@ -1,20 +1,21 @@
 import os
 import logging
+import asyncio
+import json
+import re
+
 from flask import Flask, request
 from telegram import Update, Bot
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from telegram.ext._contexttypes import ContextTypes
-import asyncio
-import re
-import json
-
-TOKEN = os.environ.get("BOT_TOKEN")
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 
 # === CẤU HÌNH LOG ===
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                    level=logging.INFO)
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# === LẤY TOKEN & URL TỪ MÔI TRƯỜNG ===
+TOKEN = os.environ.get("BOT_TOKEN")
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 
 # === TRẠNG THÁI GAME ===
 players = []
@@ -27,7 +28,6 @@ turn_timeout_task = None
 win_counts = {}
 
 BAD_WORDS = {"đần", "bần", "ngu", "ngốc", "bò", "dốt", "nát", "chó", "địt", "mẹ", "mày", "má"}
-
 VALID_PHRASES = ["trời nắng", "nắng hạ", "hạ nhiệt", "nhiệt đới", "đới khí", "khí hậu", "hậu quả", "quả táo"]
 
 # === RESET GAME ===
@@ -48,11 +48,9 @@ def is_vietnamese(text):
     return bool(re.search(r'[àáạảãâầấậẩẫăắặẳẵêèéẹẻẽềếệểễìíịỉĩòóọỏõôồốộổỗơớợởỡùúụủũưứựửữỳýỵỷỹđ]', text))
 
 def contains_bad_word(phrase):
-    """Kiểm tra xem cụm từ có chứa từ tiêu cực hay không."""
     return any(bad in phrase.split() for bad in BAD_WORDS)
 
 def is_valid_phrase(phrase):
-    """Kiểm tra xem cụm từ nối có hợp lý hay không."""
     return phrase in VALID_PHRASES
 
 # === HANDLERS ===
@@ -140,10 +138,8 @@ async def eliminate_player(update, context, reason):
     elif eliminated_index == current_player_index and current_player_index >= len(players):
         current_player_index = 0
 
-    # Thông báo số người chơi còn lại
     if len(players) > 1:
         await update.message.reply_text(f"🔴 Người chơi còn lại: {len(players)}")
-    
     if len(players) == 1:
         await declare_winner(context, players[0])
     else:
@@ -197,43 +193,34 @@ async def win_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         result += f"{i}. {chat.first_name}: {count} lần\n"
     await update.message.reply_text(result)
 
-# === KHỞI CHẠY WEBHOOK ===
+# === KHỞI TẠO APP ===
 app = Flask(__name__)
-
-# Khởi tạo Telegram bot application
 application = Application.builder().token(TOKEN).build()
 
-# Định nghĩa các hàm xử lý command
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Bot đã sẵn sàng!")
+# === ĐĂNG KÝ HANDLERS ===
+application.add_handler(CommandHandler("start", help_command))
+application.add_handler(CommandHandler("startgame", start_game))
+application.add_handler(CommandHandler("join", join_game))
+application.add_handler(CommandHandler("begin", begin_game))
+application.add_handler(CommandHandler("help", help_command))
+application.add_handler(CommandHandler("win", win_leaderboard))
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, play_word))
 
-# Thêm handler cho command /start
-application.add_handler(CommandHandler("start", start))
-
-# Định nghĩa route cho webhook
-import json  # Thêm dòng này ở đầu file
-
+# === FLASK WEBHOOK ===
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    json_str = request.get_data().decode('UTF-8')
-    data = json.loads(json_str)  # Chuyển từ string -> dict
-    update = Update.de_json(data, application.bot)
-    asyncio.run(application.process_update(update))
-    return 'ok'
+    try:
+        data = request.get_json(force=True)
+        update = Update.de_json(data, application.bot)
+        asyncio.run(application.process_update(update))
+    except Exception as e:
+        print("Webhook error:", e)
+        return 'error', 500
+    return 'ok', 200
 
-
-# Thiết lập webhook khi ứng dụng Flask bắt đầu
 @app.before_first_request
 def init_webhook():
     asyncio.run(application.bot.set_webhook(WEBHOOK_URL))
 
-
 if __name__ == "__main__":
-    application.add_handler(CommandHandler("startgame", start_game))
-    application.add_handler(CommandHandler("join", join_game))
-    application.add_handler(CommandHandler("begin", begin_game))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("win", win_leaderboard))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, play_word))
-
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
