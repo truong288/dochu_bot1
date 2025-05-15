@@ -196,6 +196,9 @@ async def win_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # === KHỞI TẠO APP ===
 app = Flask(__name__)
 application = Application.builder().token(TOKEN).build()
+@app.route("/")
+def index():
+    return "Bot is running!"
 
 # === ĐĂNG KÝ HANDLERS ===
 application.add_handler(CommandHandler("start", help_command))
@@ -214,10 +217,11 @@ def webhook():
         update = Update.de_json(data, application.bot)
         asyncio.run(application.process_update(update))
     except Exception as e:
-        print("Webhook error:", e)  # In chi tiết lỗi tại đây để debug
+        print("Webhook Error:", e)  # In lỗi ra console
+        import traceback
+        traceback.print_exc()       # In toàn bộ lỗi stack trace
         return 'error', 500
     return 'ok', 200
-
 
 @app.before_first_request
 def init_webhook():
