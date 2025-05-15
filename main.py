@@ -199,8 +199,20 @@ if __name__ == "__main__":
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, play_word))
 
     # Thiết lập webhook
+   
+    if __name__ == "__main__":
+    TOKEN = os.environ.get("BOT_TOKEN")
+    DOMAIN = "https://dochu-bot1.onrender.com"
+    WEBHOOK_PATH = "/webhook"
+
+    app = Application.builder().token(TOKEN).build()
+
+    app.add_handler(CommandHandler("startgame", start_game))
+    # ... các handler khác
+
     app.run_webhook(
         listen="0.0.0.0",
         port=int(os.environ.get("PORT", 5000)),
         webhook_url=f"{DOMAIN}{WEBHOOK_PATH}"
     )
+
