@@ -191,7 +191,7 @@ async def win_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # === KHỞI CHẠY WEBHOOK ===
 if __name__ == "__main__":
     TOKEN = os.environ.get("BOT_TOKEN")
-    DOMAIN = "https://noichu-bucw.onrender.com"  # Địa chỉ của bạn
+    DOMAIN = "https://dochu-bot1.onrender.com"  # Địa chỉ của bạn
     WEBHOOK_PATH = "/webhook"
 
     app = Application.builder().token(TOKEN).build()
