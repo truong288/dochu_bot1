@@ -1,11 +1,13 @@
 import os
 import logging
+import re
+import asyncio
 from flask import Flask, request
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from telegram.ext._contexttypes import ContextTypes
-import re
 
+# Lấy TOKEN và WEBHOOK_URL từ biến môi trường
 TOKEN = os.environ.get("BOT_TOKEN")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 
@@ -185,31 +187,29 @@ app = Flask(__name__)
 # Khởi tạo Telegram bot application
 application = Application.builder().token(os.environ.get("BOT_TOKEN")).build()
 
-# Định nghĩa các hàm xử lý command
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Bot đã sẵn sàng!")
-
-# Thêm handler cho command /start
-application.add_handler(CommandHandler("start", start))
-
 # Định nghĩa route cho webhook
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    json_str = request.get_data().decode("UTF-8")
-    update = Update.de_json(json_str, application.bot)
-    application.update_queue.put(update)
-    return 'ok', 200
+    try:
+        json_str = request.get_data().decode("UTF-8")
+        update = Update.de_json(json_str, application.bot)
+        application.update_queue.put(update)
+        logger.debug("Successfully processed webhook")
+        return 'ok', 200
+    except Exception as e:
+        logger.error(f"Error processing webhook: {e}")
+        return "Internal Server Error", 500
 
 # Thiết lập webhook khi ứng dụng Flask bắt đầu
 @app.before_first_request
 def set_webhook():
     webhook_url = os.environ.get("WEBHOOK_URL")
-    application.bot.set_webhook(webhook_url)
-
-# Thêm route cho trang chủ
-@app.route("/")
-def index():
-    return "Bot đang chạy!"
+    logger.debug(f"Setting webhook to: {webhook_url}")  # Log URL để kiểm tra
+    try:
+        application.bot.set_webhook(webhook_url)
+        logger.info("Webhook set successfully")
+    except Exception as e:
+        logger.error(f"Error setting webhook: {e}")
 
 if __name__ == "__main__":
     application.add_handler(CommandHandler("startgame", start_game))
