@@ -4,6 +4,8 @@ from flask import Flask, request
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from telegram.ext._contexttypes import ContextTypes
+TOKEN = os.environ.get("BOT_TOKEN")
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 
 # === CẤU HÌNH LOG ===
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -176,7 +178,7 @@ async def win_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(result)
 
 # === KHỞI CHẠY WEBHOOK ===
-app = Flask(__name__)
+flask_app = Flask(__name__)
 
 # Khởi tạo Telegram bot application
 application = Application.builder().token(os.environ.get("BOT_TOKEN")).build()
