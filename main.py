@@ -1,7 +1,7 @@
 import os
 import logging
 from flask import Flask, request
-from telegram import Update
+from telegram import Update, Bot
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from telegram.ext._contexttypes import ContextTypes
 import asyncio
@@ -213,16 +213,15 @@ application.add_handler(CommandHandler("start", start))
 @app.route('/webhook', methods=['POST'])
 def webhook():
     json_str = request.get_data().decode('UTF-8')
-    update = telegram.Update.de_json(json_str, bot)
-    dispatcher.process_update(update)
+    update = Update.de_json(json_str, application.bot)
+    asyncio.run(application.process_update(update))
     return 'ok'
-
 
 # Thiết lập webhook khi ứng dụng Flask bắt đầu
 @app.before_first_request
-def set_webhook():
-    webhook_url = os.environ.get("WEBHOOK_URL")
-    application.bot.set_webhook(webhook_url)
+def init_webhook():
+    asyncio.run(application.bot.set_webhook(WEBHOOK_URL))
+
 
 if __name__ == "__main__":
     application.add_handler(CommandHandler("startgame", start_game))
