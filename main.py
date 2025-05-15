@@ -178,8 +178,6 @@ async def win_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # === KHỞI CHẠY WEBHOOK ===
 app = Flask(__name__)
 
-app = Flask(__name__)
-
 # Khởi tạo Telegram bot application
 application = Application.builder().token(os.environ.get("BOT_TOKEN")).build()
 
