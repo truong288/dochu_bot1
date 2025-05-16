@@ -1,7 +1,7 @@
 import os
 import logging
 import traceback
-from flask import Flask, request
+from flask import Flask, request, jsonify
 from telegram import Update, Bot
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from telegram.ext._contexttypes import ContextTypes
@@ -205,15 +205,21 @@ def index():
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
-        data = request.get_json(force=True)
-        update = Update.de_json(data, application.bot)
-        # Dùng asyncio.run để xử lý đúng trong thread của Flask
-        asyncio.run(application.update_queue.put(update))
+        # 1. Parse JSON từ Telegram
+        json_data = request.get_json()
+        if not json_data:
+            return jsonify({"status": "error", "message": "Invalid JSON"}), 400
+
+        # 2. Xử lý update (dùng asyncio để chạy async code trong sync context)
+        update = Update.de_json(json_data, application.bot)
+        asyncio.run(application.process_update(update))
+
+        # 3. Trả về 'ok' để Telegram biết webhook hoạt động
+        return jsonify({"status": "ok"}), 200
+
     except Exception as e:
-        print("Webhook Error:", e)
-        traceback.print_exc()
-        return 'error', 500
-    return 'ok', 200
+        print(f"LỖI WEBHOOK: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 # === KHỞI CHẠY FLASK VÀ TELEGRAM APP ===
