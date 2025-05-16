@@ -234,11 +234,21 @@ if __name__ == "__main__":
     import threading
 
     async def init_bot():
-        await application.initialize()
+        await application.bot.set_webhook(WEBHOOK_URL)
         await application.start()
         print("Bot started")
+        # Giữ bot chạy
+        await application.updater.start_polling()  # hoặc await application.running.wait()
 
-    threading.Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))).start()
+    # Chạy Flask trong thread riêng
+    def run_flask():
+        app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
 
+    # Khởi chạy Flask trong luồng phụ
+    flask_thread = threading.Thread(target=run_flask)
+    flask_thread.start()
+
+    # Chạy bot (async)
     asyncio.run(init_bot())
+
 
