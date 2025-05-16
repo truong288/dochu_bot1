@@ -73,16 +73,16 @@ def webhook():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 # Các hàm xử lý game (giữ nguyên từ code của bạn)
-async def start_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def start_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ... (giữ nguyên)
 
-async def join_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def join_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ... (giữ nguyên)
 
-async def begin_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def begin_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ... (giữ nguyên)
 
-async def play_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def play_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ... (giữ nguyên)
 
 # Khởi chạy ứng dụng
