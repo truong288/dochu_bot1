@@ -1,214 +1,222 @@
 import os
 import logging
-import asyncio
-import re
-from flask import Flask, request, jsonify
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    filters,
-    ContextTypes
+    Updater, 
+    CommandHandler, 
+    MessageHandler, 
+    Filters, 
+    CallbackContext,
+    CallbackQueryHandler
 )
+from collections import defaultdict
+from datetime import datetime, timedelta
+import random
+import re
 
-# ================= CẤU HÌNH =================
-TOKEN = os.environ.get("BOT_TOKEN")
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
-PORT = int(os.environ.get("PORT", 10000))
-
-# ================= LOGGING =================
+# Cấu hình logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# ================= TRẠNG THÁI GAME =================
-class GameState:
+# Từ điển từ cấm
+BANNED_WORDS = {'đần', 'bần', 'ngu', 'ngôc', 'bò', 'dốt', 'nát', 'địt', 'đụ', 'lồn', 'cặc', 'đĩ', 'cứt'}
+
+class WordChainGame:
     def __init__(self):
-        self.reset()
-    
-    def reset(self):
-        self.players = []
-        self.current_phrase = ""
-        self.used_phrases = set()
-        self.current_player_index = 0
-        self.in_game = False
-        self.waiting_for_phrase = False
-        self.win_counts = {}
-
-game = GameState()
-BAD_WORDS = {"đần", "bần", "ngu", "ngốc", "bò", "dốt", "nát", "chó", "địt", "mẹ", "mày", "má"}
-
-# ================= TIỆN ÍCH =================
-def is_vietnamese(text):
-    return bool(re.search(r'[àáạảãâầấậẩẫăắặẳẵêèéẹẻẽềếệểễìíịỉĩòóọỏõôồốộổỗơớợởỡùúụủũưứựửữỳýỵỷỹđ]', text.lower()))
-
-def contains_bad_word(phrase):
-    return any(bad_word in phrase.lower().split() for bad_word in BAD_WORDS)
-
-# ================= HANDLERS =================
-async def start_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    game.reset()
-    game.in_game = True
-    await update.message.reply_text(
-        "🎮 Bắt đầu trò chơi!\n"
-        "👉 /join để tham gia\n"
-        "👉 /begin để khởi động"
-    )
-
-async def join_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    if user.id not in game.players:
-        game.players.append(user.id)
-        await update.message.reply_text(f"✅ {user.first_name} đã tham gia (Tổng: {len(game.players)})")
-    else:
-        await update.message.reply_text("⚠️ Bạn đã tham gia rồi!")
-
-async def begin_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if len(game.players) < 2:
-        await update.message.reply_text("❗ Cần ít nhất 2 người chơi.")
-        return
-    
-    game.waiting_for_phrase = True
-    user_id = game.players[game.current_player_index]
-    user = await context.bot.get_chat(user_id)
-    await update.message.reply_text(
-        f"✏️ {user.first_name}, hãy nhập cụm từ đầu tiên để bắt đầu!",
-        parse_mode="HTML"
-    )
-
-async def play_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not game.in_game or update.effective_user.id != game.players[game.current_player_index]:
-        return
-    
-    text = update.message.text.strip().lower()
-    
-    # Validate input
-    if not is_vietnamese(text):
-        await eliminate_player(update, context, "Không dùng tiếng Việt.")
-        return
-    
-    words = text.split()
-    if len(words) != 2:
-        await eliminate_player(update, context, "Phải gồm đúng 2 từ.")
-        return
-    
-    if contains_bad_word(text):
-        await eliminate_player(update, context, "Từ ngữ không phù hợp.")
-        return
-    
-    if text in game.used_phrases:
-        await eliminate_player(update, context, "Cụm từ đã dùng.")
-        return
-    
-    if not game.waiting_for_phrase and words[0] != game.current_phrase.split()[-1]:
-        await eliminate_player(update, context, "Không đúng từ nối.")
-        return
-    
-    # Update game state
-    game.used_phrases.add(text)
-    game.current_phrase = text
-    game.waiting_for_phrase = False
-    game.current_player_index = (game.current_player_index + 1) % len(game.players)
-    
-    if len(game.players) == 1:
-        await declare_winner(context, game.players[0])
-        return
-    
-    next_id = game.players[game.current_player_index]
-    next_player = await context.bot.get_chat(next_id)
-    await update.message.reply_text(
-        f"✅ Hợp lệ!\n➡️ Từ tiếp theo: '{game.current_phrase.split()[-1]}'\n"
-        f"👤 Lượt của {next_player.first_name}",
-        parse_mode="HTML"
-    )
-
-async def eliminate_player(update: Update, context: ContextTypes.DEFAULT_TYPE, reason: str):
-    user = update.effective_user
-    game.players.remove(user.id)
-    await update.message.reply_text(f"❌ {user.first_name} bị loại! Lý do: {reason}")
-    
-    if len(game.players) == 1:
-        await declare_winner(context, game.players[0])
-    elif game.players:
-        next_id = game.players[game.current_player_index % len(game.players)]
-        next_player = await context.bot.get_chat(next_id)
-        await update.message.reply_text(f"👤 {next_player.first_name}, tiếp tục!")
-
-async def declare_winner(context: ContextTypes.DEFAULT_TYPE, winner_id: int):
-    game.win_counts[winner_id] = game.win_counts.get(winner_id, 0) + 1
-    winner = await context.bot.get_chat(winner_id)
-    await context.bot.send_message(
-        chat_id=winner_id,
-        text=f"🏆 {winner.first_name} THẮNG CUỘC! Tổng thắng: {game.win_counts[winner_id]}"
-    )
-    game.reset()
-
-# ================= FLASK APP =================
-app = Flask(__name__)
-
-# Khởi tạo Telegram Application
-def init_telegram_app():
-    application = Application.builder() \
-        .token(TOKEN) \
-        .pool_timeout(30) \
-        .connect_timeout(30) \
-        .build()
-    
-    # Đăng ký handlers
-    application.add_handler(CommandHandler("start", start_game))
-    application.add_handler(CommandHandler("join", join_game))
-    application.add_handler(CommandHandler("begin", begin_game))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, play_word))
-    
-    return application
-
-telegram_app = init_telegram_app()
-
-@app.route('/')
-def home():
-    return "Bot đang hoạt động!"
-
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    try:
-        # Xử lý update từ Telegram
-        json_data = request.get_json()
-        update = Update.de_json(json_data, telegram_app.bot)
+        self.reset_game()
         
-        # Tạo event loop mới
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+    def reset_game(self):
+        self.players = set()
+        self.current_player = None
+        self.starter_player = None
+        self.used_words = set()
+        self.last_word = None
+        self.last_time = None
+        self.game_started = False
+        self.join_phase = True
+        self.turn_timeout = 59  # 59 giây mỗi lượt
         
-        try:
-            loop.run_until_complete(telegram_app.process_update(update))
-        finally:
-            loop.close()
+    def add_player(self, player_id, player_name):
+        self.players.add((player_id, player_name))
+        if len(self.players) == 1:
+            self.starter_player = (player_id, player_name)
+            self.current_player = (player_id, player_name)
             
-        return jsonify({"status": "ok"}), 200
+    def start_game(self):
+        if len(self.players) >= 2:
+            self.game_started = True
+            self.join_phase = False
+            return True
+        return False
         
-    except Exception as e:
-        logger.error(f"Lỗi webhook: {e}", exc_info=True)
-        return jsonify({"status": "error"}), 500
+    def is_valid_word(self, word):
+        # Kiểm tra từ có 2 từ trở lên và không chứa từ cấm
+        if len(word.split()) < 2:
+            return False
+            
+        word_lower = word.lower()
+        for banned in BANNED_WORDS:
+            if banned in word_lower:
+                return False
+                
+        return True
+        
+    def is_valid_chain(self, new_word):
+        if not self.last_word:
+            return True
+            
+        last_char = self.last_word.split()[-1][-1].lower()
+        first_char = new_word.split()[0][0].lower()
+        
+        return last_char == first_char
+        
+    def play_turn(self, player_id, word):
+        now = datetime.now()
+        
+        # Kiểm tra đến lượt
+        if player_id != self.current_player[0]:
+            return False, "Không phải lượt của bạn!"
+            
+        # Kiểm tra thời gian
+        if self.last_time and (now - self.last_time).seconds > self.turn_timeout:
+            return False, "Đã hết thời gian cho lượt này!"
+            
+        # Kiểm tra từ hợp lệ
+        if not self.is_valid_word(word):
+            return False, "Từ không hợp lệ (phải có 2 từ trở lên hoặc chứa từ cấm)"
+            
+        # Kiểm tra từ đã dùng
+        if word.lower() in self.used_words:
+            return False, "Từ này đã được sử dụng trước đó!"
+            
+        # Kiểm tra nối từ
+        if not self.is_valid_chain(word):
+            return False, "Không nối được từ! Phải bắt đầu bằng chữ cái kết thúc của từ trước"
+            
+        # Cập nhật trạng thái game
+        self.used_words.add(word.lower())
+        self.last_word = word
+        self.last_time = now
+        
+        # Chuyển lượt
+        players_list = list(self.players)
+        current_index = players_list.index(self.current_player)
+        next_index = (current_index + 1) % len(players_list)
+        self.current_player = players_list[next_index]
+        
+        return True, None
 
-# ================= MAIN =================
-async def initialize():
-    await telegram_app.initialize()
-    await telegram_app.bot.set_webhook(WEBHOOK_URL)
-    logger.info("Bot đã sẵn sàng nhận lệnh!")
+# Khởi tạo game
+game = WordChainGame()
+
+# Hàm xử lý lệnh
+def start(update: Update, context: CallbackContext) -> None:
+    update.message.reply_text(
+        "Chào mừng đến với trò chơi Nối từ!\n\n"
+        "Các lệnh:\n"
+        "/startgame - Bắt đầu trò chơi\n"
+        "/join - Tham gia\n"
+        "/reset - Đặt lại trò chơi\n"
+        "/help - Xem hướng dẫn\n"
+        "/begin - Bắt đầu sau khi đủ người chơi\n"
+    )
+
+def help_command(update: Update, context: CallbackContext) -> None:
+    update.message.reply_text(
+        "📖 Hướng dẫn chơi:\n\n"
+        "1. Người đầu tiên dùng /join sẽ là người đặt câu hỏi đầu tiên\n"
+        "2. Mỗi lượt chơi có 59 giây\n"
+        "3. Không được lặp lại từ đã dùng\n"
+        "4. Phải nối từ hợp lệ (ví dụ: 'bầu trời' -> 'trời nắng')\n"
+        "5. Từ phải có ít nhất 2 từ và không chứa từ ngữ tiêu cực\n\n"
+        "Các lệnh:\n"
+        "/join - Tham gia trò chơi\n"
+        "/startgame - Bắt đầu trò chơi (chủ phòng)\n"
+        "/begin - Bắt đầu sau khi đủ người\n"
+        "/reset - Đặt lại trò chơi\n"
+    )
+
+def join(update: Update, context: CallbackContext) -> None:
+    user = update.effective_user
+    if game.join_phase:
+        game.add_player(user.id, user.first_name)
+        update.message.reply_text(f"{user.first_name} đã tham gia trò chơi!")
+        
+        if game.starter_player and game.starter_player[0] == user.id:
+            update.message.reply_text(
+                f"Bạn là người bắt đầu trò chơi! Hãy gửi từ đầu tiên sau khi trò chơi bắt đầu."
+            )
+    else:
+        update.message.reply_text("Hiện không trong giai đoạn tham gia. Dùng /reset để tạo game mới.")
+
+def startgame(update: Update, context: CallbackContext) -> None:
+    if len(game.players) >= 1:
+        update.message.reply_text(
+            "Trò chơi đã sẵn sàng! Dùng /begin để bắt đầu khi đã đủ người chơi.\n"
+            f"Hiện có {len(game.players)} người tham gia."
+        )
+    else:
+        update.message.reply_text("Chưa có ai tham gia. Dùng /join để tham gia trò chơi.")
+
+def begin(update: Update, context: CallbackContext) -> None:
+    if game.start_game():
+        starter_name = game.starter_player[1]
+        update.message.reply_text(
+            f"Trò chơi bắt đầu! {starter_name} là người bắt đầu.\n"
+            f"{starter_name}, hãy gửi từ đầu tiên (gồm 2 từ trở lên)."
+        )
+    else:
+        update.message.reply_text("Cần ít nhất 2 người chơi để bắt đầu!")
+
+def reset(update: Update, context: CallbackContext) -> None:
+    game.reset_game()
+    update.message.reply_text("Trò chơi đã được đặt lại. Dùng /join để tham gia.")
+
+def handle_message(update: Update, context: CallbackContext) -> None:
+    if not game.game_started:
+        return
+        
+    user = update.effective_user
+    word = update.message.text.strip()
+    
+    success, error = game.play_turn(user.id, word)
+    
+    if success:
+        next_player = game.current_player[1]
+        update.message.reply_text(
+            f"✅ Từ '{word}' được chấp nhận!\n"
+            f"⏳ Thời gian còn lại: {game.turn_timeout} giây\n"
+            f"🎮 Đến lượt: {next_player}"
+        )
+    elif error:
+        update.message.reply_text(f"❌ {error}")
+
+def main() -> None:
+    # Lấy token từ biến môi trường
+    TOKEN = os.getenv('7995385268:AAEx4uelfTCYtzkze0vZ4G4eDaau_EfYnjw')
+    if not TOKEN:
+        raise ValueError("Vui lòng đặt biến môi trường TELEGRAM_TOKEN")
+    
+    updater = Updater(TOKEN)
+    dispatcher = updater.dispatcher
+
+    # Đăng ký các lệnh
+    dispatcher.add_handler(CommandHandler("start", start))
+    dispatcher.add_handler(CommandHandler("help", help_command))
+    dispatcher.add_handler(CommandHandler("join", join))
+    dispatcher.add_handler(CommandHandler("startgame", startgame))
+    dispatcher.add_handler(CommandHandler("begin", begin))
+    dispatcher.add_handler(CommandHandler("reset", reset))
+    
+    # Xử lý tin nhắn thường
+    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
+
+    # Bắt đầu bot
+    updater.start_polling()
+    updater.idle()
 
 if __name__ == '__main__':
-    # Khởi tạo và chạy ứng dụng
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    
-    try:
-        loop.run_until_complete(initialize())
-        app.run(host='0.0.0.0', port=PORT)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        loop.run_until_complete(telegram_app.shutdown())
-        loop.close()
+    main()
