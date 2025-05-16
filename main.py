@@ -3,7 +3,7 @@ import logging
 import traceback
 from flask import Flask, request
 from telegram import Update, Bot
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from telegram.ext import Application, CommandHandler, @app.route, filters
 from telegram.ext._contexttypes import ContextTypes
 import asyncio
 import re
@@ -207,8 +207,7 @@ def webhook():
     try:
         data = request.get_json(force=True)
         update = Update.de_json(data, application.bot)
-        # Dùng asyncio.run để xử lý đúng trong thread của Flask
-        asyncio.run(application.update_queue.put(update))
+        application.update_queue.put_nowait(update)
     except Exception as e:
         print("Webhook Error:", e)
         traceback.print_exc()
@@ -228,11 +227,18 @@ application.add_handler(CommandHandler("join", join_game))
 application.add_handler(CommandHandler("begin", begin_game))
 application.add_handler(CommandHandler("help", help_command))
 application.add_handler(CommandHandler("win", win_leaderboard))
-application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, play_word))
+application.add_handler(@app.route(filters.TEXT & ~filters.COMMAND, play_word))
 
 # Chạy Flask app
 if __name__ == "__main__":
-    asyncio.run(application.initialize())  # Đảm bảo Application được khởi tạo
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+    import threading
 
+    async def init_bot():
+        await application.initialize()
+        await application.start()
+        print("Bot started")
+
+    threading.Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))).start()
+
+    asyncio.run(init_bot())
 
