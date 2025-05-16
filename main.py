@@ -258,4 +258,5 @@ if __name__ == "__main__":
     # Chỉ set webhook khi chạy trực tiếp
     loop = asyncio.get_event_loop()
     loop.run_until_complete(set_webhook())
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
