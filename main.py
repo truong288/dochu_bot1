@@ -89,7 +89,49 @@ async def begin_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await start_turn_timer(context)
 
 async def play_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (giữ nguyên logic từ code trước)
+    global current_phrase, current_player_index, used_phrases, players, in_game, waiting_for_phrase
+    if not in_game:
+        return
+    user = update.effective_user
+    text = update.message.text.strip().lower()
+    if user.id != players[current_player_index]:
+        return
+    if not is_vietnamese(text):
+        await eliminate_player(update, context, "Không dùng tiếng Việt.")
+        return
+    words = text.split()
+    if len(words) != 2:
+        await eliminate_player(update, context, "Phải gồm đúng 2 từ.")
+        return
+    if contains_bad_word(text):
+        await eliminate_player(update, context, "Từ ngữ không phù hợp.")
+        return
+    if used_phrases.get(text):
+        await eliminate_player(update, context, "Cụm từ đã dùng.")
+        return
+    if not waiting_for_phrase and words[0] != current_phrase.split()[-1]:
+        await eliminate_player(update, context, "Không đúng từ nối.")
+        return
+    if not is_valid_phrase(text):
+        await eliminate_player(update, context, "Cụm từ nối không hợp lệ.")
+        return
+
+    used_phrases[text] = 1
+    current_phrase = text
+    waiting_for_phrase = False
+    current_player_index = (current_player_index + 1) % len(players)
+
+    if len(players) == 1:
+        await declare_winner(context, players[0])
+        return
+
+    next_id = players[current_player_index]
+    next_chat = await context.bot.get_chat(next_id)
+    mention = f"<a href='tg://user?id={next_id}'>{next_chat.first_name}</a>"
+    await update.message.reply_text(
+        f"✅ Hợp lệ!\n➡️ Từ tiếp theo bắt đầu bằng: '{current_phrase.split()[-1]}'\nTới lượt {mention}",
+        parse_mode="HTML")
+    await start_turn_timer(context)
 
 # Khởi chạy ứng dụng
 async def initialize():
