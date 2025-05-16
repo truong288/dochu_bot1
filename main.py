@@ -26,20 +26,14 @@ logger = logging.getLogger(__name__)
 # Khởi tạo Flask app
 app = Flask(__name__)
 
-# Khởi tạo Telegram Application
-def init_telegram_app():
-    application = Application.builder().token(TOKEN).build()
-    
-    # Đăng ký handlers
-    application.add_handler(CommandHandler("start", start_game))
-    application.add_handler(CommandHandler("join", join_game))
-    application.add_handler(CommandHandler("begin", begin_game))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, play_word))
-    
-    return application
+# Khởi tạo Telegram Application như một biến toàn cục
+telegram_app = Application.builder().token(TOKEN).build()
 
-# Biến toàn cục cho Telegram Application
-telegram_app = None
+# Đăng ký handlers
+telegram_app.add_handler(CommandHandler("start", start_game))
+telegram_app.add_handler(CommandHandler("join", join_game))
+telegram_app.add_handler(CommandHandler("begin", begin_game))
+telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, play_word))
 
 # Route chính
 @app.route('/')
@@ -49,18 +43,12 @@ def index():
 # Webhook endpoint
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    global telegram_app
     try:
-        # Khởi tạo nếu chưa có
-        if telegram_app is None:
-            telegram_app = init_telegram_app()
-            asyncio.run(telegram_app.initialize())
-        
         # Xử lý update
         json_data = request.get_json()
         update = Update.de_json(json_data, telegram_app.bot)
         
-        # Sử dụng event loop riêng để xử lý async
+        # Tạo event loop mới cho mỗi request
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(telegram_app.process_update(update))
@@ -69,34 +57,51 @@ def webhook():
         return jsonify({"status": "ok"}), 200
     
     except Exception as e:
-        logger.error(f"Lỗi webhook: {str(e)}")
+        logger.error(f"Lỗi webhook: {str(e)}", exc_info=True)
         return jsonify({"status": "error", "message": str(e)}), 500
 
-# Các hàm xử lý game (giữ nguyên từ code của bạn)
-    async def start_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (giữ nguyên)
+# Các hàm xử lý game
+async def start_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    reset_game()
+    global in_game
+    in_game = True
+    await update.message.reply_text("🎮 Bắt đầu trò chơi!\n👉 /join để tham gia\n👉 /begin để khởi động")
 
-    async def join_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (giữ nguyên)
+async def join_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global players
+    user = update.effective_user
+    if user.id not in players:
+        players.append(user.id)
+        await update.message.reply_text(f"✅ {user.first_name} đã tham gia (Tổng: {len(players)})")
+    else:
+        await update.message.reply_text("⚠️ Bạn đã tham gia rồi!")
 
-    async def begin_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (giữ nguyên)
+async def begin_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global current_player_index, waiting_for_phrase
+    if len(players) < 2:
+        await update.message.reply_text("❗ Cần ít nhất 2 người chơi.")
+        return
+    waiting_for_phrase = True
+    user_id = players[current_player_index]
+    chat = await context.bot.get_chat(user_id)
+    mention = f"<a href='tg://user?id={user_id}'>{chat.first_name}</a>"
+    await update.message.reply_text(f"✏️ {mention}, hãy nhập cụm từ đầu tiên để bắt đầu!", parse_mode="HTML")
+    await start_turn_timer(context)
 
-    async def play_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (giữ nguyên)
+async def play_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ... (giữ nguyên logic từ code trước)
 
 # Khởi chạy ứng dụng
+async def initialize():
+    await telegram_app.initialize()
+    await telegram_app.bot.set_webhook(WEBHOOK_URL)
+    logger.info("Bot đã được khởi tạo và webhook đã được thiết lập")
+
 if __name__ == '__main__':
-    # Khởi tạo và set webhook
-    async def main():
-        global telegram_app
-        telegram_app = init_telegram_app()
-        await telegram_app.initialize()
-        await telegram_app.bot.set_webhook(WEBHOOK_URL)
-    
+    # Khởi tạo bot và set webhook
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    loop.run_until_complete(main())
+    loop.run_until_complete(initialize())
     
     # Chạy Flask app
     app.run(host='0.0.0.0', port=PORT)
