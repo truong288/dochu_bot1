@@ -7,6 +7,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from telegram.ext._contexttypes import ContextTypes
 import asyncio
 import re
+import json
 
 TOKEN = os.environ.get("BOT_TOKEN")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
