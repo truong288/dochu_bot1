@@ -1,206 +1,355 @@
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+from stay_alive import keep_alive
+import asyncio
 import re
 import random
-from datetime import datetime, timedelta
-from telegram import Update
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    ContextTypes,
-    filters
-)
+
+
+keep_alive()
 
 # Game state
-game_state = {
-    "is_playing": False,
-    "players": [],
-    "current_player": None,
-    "used_words": [],
-    "last_word": "",
-    "start_time": None,
-    "winner_counts": {},
-    "bot_playing": False
-}
+players = []
+current_phrase = ""
+used_phrases = {}
+current_player_index = 0
+in_game = False
+waiting_for_phrase = False
+turn_timeout_task = None
+bot_playing = False
 
-# Banned words
-BANNED_WORDS = {"đần", "bần", "ngu", "ngốc", "bò", "dốt", "nát", "chó", "địt", "mẹ", "mày", "lồn", "má"}
+# Bad words 
+BAD_WORDS = {"đần", "bần", "ngu", "ngốc", "bò", "dốt", "nát", "chó", "địt", "mẹ", "mày", "má"}
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text(
-        "🎮 Game Nối Chữ đã sẵn sàng!\n"
-        "📝 Các lệnh:\n"
-        "/startgame - Bắt đầu trò chơi\n"
-        "/join - Tham gia\n"
-        "/reset - Đặt lại trò chơi\n"
-        "/help - Hướng dẫn\n"
-        "/begin - Bắt đầu sau khi đủ người\n"
-        "/botplay - Chơi với bot"
-    )
+def reset_game():
+    global players, current_phrase, used_phrases, current_player_index, in_game, waiting_for_phrase, turn_timeout_task, bot_playing
+    players = []
+    current_phrase = ""
+    used_phrases = {}
+    current_player_index = 0
+    in_game = False
+    waiting_for_phrase = False
+    bot_playing = False
+    if turn_timeout_task:
+        turn_timeout_task.cancel()
+        turn_timeout_task = None
 
-async def start_game(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if game_state["is_playing"]:
-        await update.message.reply_text("⚠️ Game đang chạy!")
-        return
 
-    game_state.update({
-        "is_playing": True,
-        "players": [],
-        "used_words": [],
-        "last_word": "",
-        "current_player": None
-    })
-    await update.message.reply_text("🎉 Game đã được khởi tạo! Gõ /join để tham gia.")
+def contains_bad_word(text):
+    return any(word in text.lower() for word in BAD_WORDS)
 
-async def join_game(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+
+def is_vietnamese(text):
+    vietnamese_chars = r"[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđÀÁẠẢÃÂẦẤẬẨẪĂẰẮẶẲẴÈÉẸẺẼÊỀẾỆỂỄÌÍỊỈĨÒÓỌỎÕÔỒỐỘỔỖƠỜỚỢỞỠÙÚỤỦŨƯỪỨỰỬỮỲÝỴỶỸĐ]"
+    return bool(re.search(vietnamese_chars, text))
+
+
+async def start_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    reset_game()
+    global in_game
+    in_game = True
+
+    await update.message.reply_text("🎮 Trò chơi bắt đầu!\n"
+                                   "👉 Gõ /join để tham gia.\n"
+                                   "👉 Gõ /begin để bắt đầu chơi.\n"
+                                   "👉 Gõ /botplay để chơi với bot")
+
+
+async def join_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global players
     user = update.effective_user
-    if user.id in [p['id'] for p in game_state["players"]]:
+    if user.id not in players:
+        players.append(user.id)
+        await update.message.reply_text(
+            f"✅ {user.first_name} đã tham gia... (Tổng {len(players)})")
+    else:
         await update.message.reply_text("⚠️ Bạn đã tham gia rồi!")
-        return
 
-    game_state["players"].append({"id": user.id, "name": user.full_name})
-    await update.message.reply_text(f"✅ {user.full_name} đã tham gia! Số người chơi: {len(game_state['players'])}")
 
-async def reset_game(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    game_state.update({
-        "is_playing": False,
-        "players": [],
-        "used_words": [],
-        "last_word": "",
-        "current_player": None
-    })
-    await update.message.reply_text("♻️ Game đã được reset!")
-
-async def begin_game(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if len(game_state["players"]) < 2:
-        await update.message.reply_text("⚠️ Cần ít nhất 2 người chơi!")
-        return
-
-    game_state["current_player"] = random.choice(game_state["players"])
-    game_state["start_time"] = datetime.now()
-    await update.message.reply_text(
-        f"🔔 Game bắt đầu! Người ra từ đầu tiên là: {game_state['current_player']['name']}\n"
-        f"📌 Gõ từ bất kỳ (VD: 'bầu trời') để bắt đầu nối chữ.\n"
-        f"⏰ Mỗi lượt có 59 giây!"
-    )
-
-async def bot_play(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    game_state["bot_playing"] = True
+async def bot_play(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global bot_playing
+    bot_playing = True
     await start_game(update, context)
     await join_game(update, context)
-    game_state["players"].append({"id": 0, "name": "Bot 🤖"})
+    players.append(0)  # 0 represents bot
     await update.message.reply_text("🤖 Bot đã tham gia! Gõ /begin để bắt đầu.")
 
-def validate_word(word: str) -> bool:
-    if any(banned in word.lower() for banned in BANNED_WORDS):
-        return False
-    if len(word.split()) < 2:
-        return False
-    if re.search(r"[a-zA-Z0-9]", word):
-        return False
-    return True
 
-def check_word_connection(last_word: str, new_word: str) -> bool:
-    if not last_word:
-        return True
-    return new_word.lower().startswith(last_word.split()[-1].lower())
+async def begin_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global current_player_index, waiting_for_phrase
+    if len(players) < 2:
+        await update.message.reply_text("❗ Cần ít nhất 2 người chơi để bắt đầu.")
+        return
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not game_state["is_playing"] or not game_state["current_player"]:
+    waiting_for_phrase = True
+    user_id = players[current_player_index]
+    
+    if user_id == 0:  # Bot's turn
+        await bot_turn(context)
+        return
+    
+    chat = await context.bot.get_chat(user_id)
+    mention = f"<a href='tg://user?id={user_id}'>@{chat.username or chat.first_name}</a>"
+
+    await update.message.reply_text(
+        f"✏️ {mention}, hãy nhập cụm từ đầu tiên để bắt đầu trò chơi!",
+        parse_mode="HTML")
+    await start_turn_timer(context)
+
+
+async def bot_turn(context):
+    global current_phrase, current_player_index, used_phrases
+    
+    if not current_phrase:  # First turn
+        bot_phrase = random.choice(SAMPLE_PHRASES)
+        current_phrase = bot_phrase
+        used_phrases[bot_phrase] = 1
+        current_player_index = (current_player_index + 1) % len(players)
+        
+        await context.bot.send_message(
+            chat_id=context._chat_id,
+            text=f"🤖 Bot chọn: '{bot_phrase}'"
+        )
+        
+        if players[current_player_index] == 0:  # Next player is also bot
+            await asyncio.sleep(2)
+            await bot_turn(context)
+        else:
+            next_id = players[current_player_index]
+            next_chat = await context.bot.get_chat(next_id)
+            mention = f"<a href='tg://user?id={next_id}'>@{next_chat.username or next_chat.first_name}</a>"
+            await context.bot.send_message(
+                chat_id=context._chat_id,
+                text=f"✅ Từ bắt đầu là: '{bot_phrase}'. {mention}, hãy nối với từ '{bot_phrase.split()[-1]}'",
+                parse_mode="HTML")
+            await start_turn_timer(context)
+    else:
+        last_word = current_phrase.split()[-1]
+        possible_phrases = [phrase for phrase in SAMPLE_PHRASES 
+                          if phrase.startswith(last_word) and phrase not in used_phrases]
+        
+        if possible_phrases:
+            bot_phrase = random.choice(possible_phrases)
+        else:
+            bot_phrase = last_word + " ... 🤖 Bot bí!"
+        
+        used_phrases[bot_phrase] = 1
+        current_phrase = bot_phrase
+        current_player_index = (current_player_index + 1) % len(players)
+        
+        await context.bot.send_message(
+            chat_id=context._chat_id,
+            text=f"🤖 Bot nối: '{bot_phrase}'"
+        )
+        
+        if len(players) == 1:
+            await context.bot.send_message(
+                chat_id=context._chat_id,
+                text="🏆 Bot chiến thắng! 🤖🎉")
+            reset_game()
+            return
+            
+        if players[current_player_index] == 0:  # Next player is also bot
+            await asyncio.sleep(2)
+            await bot_turn(context)
+        else:
+            next_id = players[current_player_index]
+            next_chat = await context.bot.get_chat(next_id)
+            mention = f"<a href='tg://user?id={next_id}'>@{next_chat.username or next_chat.first_name}</a>"
+            await context.bot.send_message(
+                chat_id=context._chat_id,
+                text=f"✅ Hợp lệ! Nối tiếp từ: '{bot_phrase.split()[-1]}'. Tới lượt bạn {mention}",
+                parse_mode="HTML")
+            await start_turn_timer(context)
+
+
+async def play_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+
+    if not in_game:
         return
 
     user = update.effective_user
-    if user.id != game_state["current_player"]["id"]:
+    text = update.message.text.strip().lower()
+
+    if user.id != players[current_player_index]:
         return
 
-    word = update.message.text.strip()
+   # Kiểm tra từ cấm
+    if contains_bad_word(text):
+        await update.message.reply_text("❌ Từ cấm! Bị loại!")
+        await eliminate_player(update)
+        return
     
-    if not validate_word(word):
-        await update.message.reply_text("❌ Từ không hợp lệ! Bị loại!")
-        await remove_player(user.id)
+    # Kiểm tra tiếng Việt
+    if not is_vietnamese(text):
+        await update.message.reply_text("❌ Chỉ dùng tiếng Việt!")
+        await eliminate_player(update)
+        return
+    
+    # Kiểm tra 2 từ
+    if len(text.split()) != 2:
+        await update.message.reply_text("❌ Phải nhập 2 từ!")
         return
 
-    if not check_word_connection(game_state["last_word"], word):
-        await update.message.reply_text("❌ Nối sai! Bị loại!")
-        await remove_player(user.id)
+    if waiting_for_phrase:
+        current_phrase = text
+        used_phrases[text] = 1
+        waiting_for_phrase = False
+        current_player_index = (current_player_index + 1) % len(players)
+
+        if players[current_player_index] == 0:  # Bot's turn next
+            await bot_turn(context)
+            return
+            
+        next_id = players[current_player_index]
+        next_chat = await context.bot.get_chat(next_id)
+        mention = f"<a href='tg://user?id={next_id}'>@{next_chat.username or next_chat.first_name}</a>"
+
+        await update.message.reply_text(
+            f"✅ Từ bắt đầu là: '{text}'. {mention}, hãy nối với từ '{text.split()[-1]}'",
+            parse_mode="HTML")
+        await start_turn_timer(context)
         return
 
-    if word.lower() in [w.lower() for w in game_state["used_words"]]:
-        await update.message.reply_text("❌ Từ đã dùng! Bị loại!")
-        await remove_player(user.id)
+    if text.split()[0] != current_phrase.split()[-1]:
+        await eliminate_player(update, context, reason="Không đúng từ nối")
         return
 
-    game_state["used_words"].append(word)
-    game_state["last_word"] = word
-    await next_player()
+    if used_phrases.get(text, 0) >= 1:
+        await eliminate_player(update, context, reason="Cụm từ đã bị sử dụng")
+        return
 
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text=f"✅ {user.full_name} nối: '{word}'\n"
-             f"👤 Lượt tiếp theo: {game_state['current_player']['name']}\n"
-             f"⏰ Hết hạn lúc: {(datetime.now() + timedelta(seconds=59)).strftime('%H:%M:%S')}"
-    )
+    used_phrases[text] = 1
+    current_phrase = text
+    current_player_index = (current_player_index + 1) % len(players)
 
-    if game_state["bot_playing"] and game_state["current_player"]["id"] == 0:
-        bot_word = generate_bot_word(word)
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text=f"🤖 Bot nối: '{bot_word}'"
-        )
-        game_state["used_words"].append(bot_word)
-        game_state["last_word"] = bot_word
-        await next_player()
+    if len(players) == 1:
+        winner_id = players[0]
+        if winner_id == 0:
+            await update.message.reply_text("🏆 Bot chiến thắng! 🤖🎉")
+        else:
+            chat = await context.bot.get_chat(winner_id)
+            mention = f"<a href='tg://user?id={winner_id}'>@{chat.username or chat.first_name}</a>"
+            await update.message.reply_text(f"🏆 {mention} Vô Địch Nối CHỮ!🏆🏆",
+                                          parse_mode="HTML")
+        reset_game()
+        return
 
-def generate_bot_word(last_word: str) -> str:
-    sample_words = ["hoa quả", "quả táo", "táo bạo", "bạo lực", "lực lượng"]
-    for w in sample_words:
-        if w not in game_state["used_words"] and w.startswith(last_word.split()[-1]):
-            return w
-    return last_word.split()[-1] + " ... 🤖 Bot bí!"
+    if players[current_player_index] == 0:  # Bot's turn next
+        await bot_turn(context)
+        return
+        
+    next_id = players[current_player_index]
+    next_chat = await context.bot.get_chat(next_id)
+    next_mention = f"<a href='tg://user?id={next_id}'>@{next_chat.username or next_chat.first_name}</a>"
 
-async def remove_player(player_id: int):
-    game_state["players"] = [p for p in game_state["players"] if p["id"] != player_id]
-    if len(game_state["players"]) == 1:
-        await end_game(winner=game_state["players"][0])
+    await update.message.reply_text(
+        f"✅ Hợp lệ! Nối tiếp từ: '{text.split()[-1]}'. Tới lượt bạn {next_mention}",
+        parse_mode="HTML")
+    await start_turn_timer(context)
+
+
+async def eliminate_player(update, context, reason):
+    global players, current_player_index
+    user = update.effective_user
+    await update.message.reply_text(
+        f"❌ {user.first_name} bị loại! Lý do: {reason}")
+    players.remove(user.id)
+    if current_player_index >= len(players):
+        current_player_index = 0
+
+    if len(players) == 1:
+        winner_id = players[0]
+        if winner_id == 0:
+            await update.message.reply_text("🏆 Bot chiến thắng! 🤖🎉")
+        else:
+            chat = await context.bot.get_chat(winner_id)
+            mention = f"<a href='tg://user?id={winner_id}'>@{chat.username or chat.first_name}</a>"
+            await update.message.reply_text(f"🏆 {mention} Vô Địch Nối CHỮ!🏆🏆",
+                                          parse_mode="HTML")
+        reset_game()
     else:
-        await next_player()
+        await update.message.reply_text(
+            f"Hiện còn lại {len(players)} người chơi.")
+        await begin_game(update, context)
 
-async def next_player():
-    current_idx = next((i for i, p in enumerate(game_state["players"]) 
-                       if p["id"] == game_state["current_player"]["id"]), 0)
-    next_idx = (current_idx + 1) % len(game_state["players"])
-    game_state["current_player"] = game_state["players"][next_idx]
-    game_state["start_time"] = datetime.now()
 
-async def end_game(winner: dict):
-    game_state["winner_counts"][winner["id"]] = game_state["winner_counts"].get(winner["id"], 0) + 1
-    
-    winner_text = (
-        f"🎉 CHIẾN THẮNG: {winner['name']}!\n"
-        f"🏆 Tổng thắng: {game_state['winner_counts'][winner['id']]} lần"
+async def start_turn_timer(context):
+    global turn_timeout_task
+    if turn_timeout_task:
+        turn_timeout_task.cancel()
+    turn_timeout_task = asyncio.create_task(turn_timer(context))
+
+
+async def turn_timer(context):
+    global players, current_player_index
+    try:
+        await asyncio.sleep(59)
+        user_id = players[current_player_index]
+        
+        if user_id == 0:  # Bot's turn - shouldn't timeout
+            return
+            
+        chat = await context.bot.get_chat(user_id)
+        mention = f"<a href='tg://user?id={user_id}'>@{chat.username or chat.first_name}</a>"
+
+        await context.bot.send_message(
+            chat_id=context._chat_id,
+            text=f"⏰ {mention} hết thời gian và bị loại!",
+            parse_mode="HTML")
+        players.remove(user_id)
+
+        if len(players) == 1:
+            winner_id = players[0]
+            if winner_id == 0:
+                await context.bot.send_message(
+                    chat_id=context._chat_id,
+                    text="🏆 Bot chiến thắng! 🤖🎉")
+            else:
+                winner_chat = await context.bot.get_chat(winner_id)
+                mention = f"<a href='tg://user?id={winner_id}'>@{winner_chat.username or winner_chat.first_name}</a>"
+                await context.bot.send_message(
+                    chat_id=context._chat_id,
+                    text=f"🏆 {mention} Vô Địch Nối CHỮ!🏆🏆",
+                    parse_mode="HTML")
+            reset_game()
+            return
+
+        if current_player_index >= len(players):
+            current_player_index = 0
+
+        await start_turn_timer(context)
+
+    except asyncio.CancelledError:
+        pass
+
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "/startgame - Bắt đầu trò chơi\n"
+        "/join - Tham gia\n"
+        "/botplay - Chơi với bot\n"
+        "/begin - Bắt đầu sau khi đủ người\n"
+        "/help - Hướng dẫn\n\n"
+        "📌 Luật chơi:\n"
+        "- Mỗi người nhập cụm từ 2 từ\n"
+        "- Từ đầu phải nối với từ cuối của người trước\n"
+        "- Không dùng từ cấm hoặc không phải tiếng Việt\n"
+        "- Mỗi lượt có 59 giây"
     )
-    if game_state["bot_playing"]:
-        winner_text += "\n🤖 Bot đã bị đánh bại!" if winner["id"] != 0 else "\n🤖 Bot chiến thắng!"
 
-    game_state["is_playing"] = False
-    game_state["bot_playing"] = False
-    
-    await context.bot.send_message(
-        chat_id=winner["id"],
-        text=winner_text
-    )
 
-def main() -> None:
-    application = Application.builder().token("7995385268:AAEx4uelfTCYtzkze0vZ4G4eDaau_EfYnjw").build()
+if __name__ == '__main__':
+    TOKEN = "YOUR_BOT_TOKEN_HERE"
+    app = ApplicationBuilder().token(TOKEN).build()
 
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("startgame", start_game))
-    application.add_handler(CommandHandler("join", join_game))
-    application.add_handler(CommandHandler("reset", reset_game))
-    application.add_handler(CommandHandler("begin", begin_game))
-    application.add_handler(CommandHandler("botplay", bot_play))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(CommandHandler("startgame", start_game))
+    app.add_handler(CommandHandler("join", join_game))
+    app.add_handler(CommandHandler("botplay", bot_play))
+    app.add_handler(CommandHandler("begin", begin_game))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, play_word))
 
-    application.run_polling()
-
-if __name__ == "__main__":
-    main()
+    print("Bot is running...")
+    app.run_polling()
