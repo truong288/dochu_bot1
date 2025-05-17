@@ -1,6 +1,7 @@
 import re
 import asyncio
 import random
+from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from telegram import Update
@@ -11,19 +12,18 @@ from telegram.ext import (
     ContextTypes,
     filters
 )
-import requests
 
 # ===== CẤU HÌNH =====
 BOT_TOKEN = "7995385268:AAEx4uelfTCYtzkze0vZ4G4eDaau_EfYnjw"
-DICTIONARY_API = "https://api.tudien.com/check"
-
-# Từ cấm
-BAD_WORDS = {"đần", "bần", "ngu", "ngốc", "bò", "dốt", "nát", "chó", "địt", "mẹ", "mày", "má"}
+DICTIONARY_API = "https://api.tudien.com/check"  # (Có thể bỏ qua nếu không có)
 
 # ===== LỚP QUẢN LÝ GAME =====
 class GameManager:
     def __init__(self):
         self.reset()
+        self.learned_pairs = defaultdict(list)  # Lưu các cặp từ học được từ người chơi
+        self.common_prefixes = ["trời", "mưa", "nắng", "hoa", "cây", "nhà", "sông", "núi"]
+        self.common_suffixes = ["đẹp", "cao", "lớn", "nhỏ", "xanh", "vàng", "to", "nhẹ"]
 
     def reset(self):
         self.players: List[Dict] = []
@@ -50,10 +50,43 @@ class GameManager:
             self.current_player_index = 0
         return len(self.players)
 
+    def learn_new_pair(self, last_word: str, new_word: str):
+        """Học cặp từ mới từ người chơi"""
+        if new_word not in self.learned_pairs[last_word]:
+            self.learned_pairs[last_word].append(new_word)
+
+    def generate_bot_phrase(self, last_word: str) -> str:
+        """Tạo cụm từ mới cho bot một cách thông minh"""
+        # Ưu tiên dùng các cặp đã học được
+        if last_word in self.learned_pairs and self.learned_pairs[last_word]:
+            learned_options = [phrase for phrase in self.learned_pairs[last_word] 
+                             if f"{last_word} {phrase}".lower() not in self.used_phrases]
+            if learned_options:
+                return f"{last_word} {random.choice(learned_options)}"
+
+        # Tạo các lựa chọn đa dạng
+        patterns = [
+            # Mẫu 1: Tính từ
+            f"{last_word} {random.choice(self.common_suffixes)}",
+            # Mẫu 2: Kết hợp với từ tự nhiên
+            f"{last_word} {random.choice(['và', 'cùng', 'với'])} {random.choice(self.common_prefixes)}",
+            # Mẫu 3: Đảo vị trí
+            f"{random.choice(self.common_prefixes)} {last_word}",
+            # Mẫu 4: Giới từ + danh từ
+            f"{last_word} {random.choice(['trên', 'dưới', 'trong', 'ngoài'])} {random.choice(self.common_prefixes)}"
+        ]
+
+        # Tạo 5 ứng viên và chọn cái chưa dùng
+        candidates = [random.choice(patterns) for _ in range(5)]
+        unused = [phrase for phrase in candidates if phrase.lower() not in self.used_phrases]
+
+        return random.choice(unused) if unused else f"{last_word} {random.choice(self.common_suffixes)}"
+
 game = GameManager()
 
 # ===== TIỆN ÍCH KIỂM TRA =====
 def contains_bad_word(text: str) -> bool:
+    BAD_WORDS = {"đần", "bần", "ngu", "ngốc", "bò", "dốt", "nát", "chó", "địt", "mẹ", "mày", "má"}
     text_lower = text.lower()
     return any(bad_word in text_lower for bad_word in BAD_WORDS)
 
@@ -96,7 +129,7 @@ async def start_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def join_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     game.add_player(user.id, user.full_name)
-    await update.message.reply_text(f"✅ {user.full_name} đã tham gia! (Tổng: {len(game.players)}")
+    await update.message.reply_text(f"✅ {user.full_name} đã tham gia! (Tổng: {len(game.players)})")
 
 async def bot_play(update: Update, context: ContextTypes.DEFAULT_TYPE):
     game.bot_playing = True
@@ -158,10 +191,51 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await handle_player_elimination(remaining, context)
             return
         
+        # Học cặp từ mới từ người chơi
+        last_word = game.current_phrase.split()[-1].lower()
+        current_word = text.split()[0].lower()
+        game.learn_new_pair(last_word, current_word)
+        
         game.used_phrases[text.lower()] = 1
         game.current_phrase = text
     
     game.next_player()
+    
+    if len(game.players) == 1:
+        await end_game(context)
+    else:
+        await continue_game(context)
+
+async def bot_turn(context: ContextTypes.DEFAULT_TYPE):
+    if not game.current_phrase:
+        # Các cụm từ mở đầu đa dạng
+        starters = ["bầu trời", "mặt trời", "hoa lá", "chim muông", "sông nước", 
+                   "núi non", "biển cả", "trăng sao", "mây gió", "cây cối"]
+        bot_phrase = random.choice(starters)
+    else:
+        last_word = game.current_phrase.split()[-1].lower()
+        bot_phrase = game.generate_bot_phrase(last_word)
+    
+        # Đảm bảo không trùng lặp
+        attempts = 0
+        while bot_phrase.lower() in game.used_phrases and attempts < 5:
+            bot_phrase = game.generate_bot_phrase(last_word)
+            attempts += 1
+        
+        if attempts == 5:
+            bot_phrase = f"{last_word} {random.choice(game.common_suffixes)}"
+
+    game.used_phrases[bot_phrase.lower()] = 1
+    game.current_phrase = bot_phrase
+    game.next_player()
+    
+    await context.bot.send_message(
+        chat_id=context._chat_id,
+        text=f"🤖 Bot đã nối từ\n"
+             f"👉 Cụm từ mới: 『{bot_phrase}』\n"
+             f"👉 Từ cần nối tiếp: 『{bot_phrase.split()[-1]}』",
+        parse_mode="HTML"
+    )
     
     if len(game.players) == 1:
         await end_game(context)
@@ -198,30 +272,6 @@ async def continue_game(context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML"
         )
         await start_turn_timer(context)
-
-async def bot_turn(context: ContextTypes.DEFAULT_TYPE):
-    if not game.current_phrase:
-        bot_phrase = "bầu trời"
-    else:
-        last_word = game.current_phrase.split()[-1]
-        bot_phrase = f"{last_word} mưa"  # Ví dụ đơn giản
-    
-    game.used_phrases[bot_phrase.lower()] = 1
-    game.current_phrase = bot_phrase
-    game.next_player()
-    
-    await context.bot.send_message(
-        chat_id=context._chat_id,
-        text=f"🤖 Bot đã nối từ\n"
-             f"👉 Từ hiện tại: 『{bot_phrase.split()[-1]}』\n"
-             f"🔜 Chờ người tiếp theo nối...",
-        parse_mode="HTML"
-    )
-    
-    if len(game.players) == 1:
-        await end_game(context)
-    else:
-        await continue_game(context)
 
 async def end_game(context: ContextTypes.DEFAULT_TYPE):
     if not game.players:
@@ -295,7 +345,4 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
     print("Bot đang chạy...")
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
+    app.run
