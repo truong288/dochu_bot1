@@ -255,6 +255,7 @@ async def notify_and_continue(remaining_players: int, context: ContextTypes.DEFA
 async def continue_game(context: ContextTypes.DEFAULT_TYPE):
     """Tiếp tục game với người chơi hiện tại"""
     current_player = game.players[game.current_player_index]
+    last_word = game.current_phrase.split()[-1] if game.current_phrase else ""
     
     if current_player["id"] == 0:  # Bot chơi
         await bot_turn(context)
@@ -262,12 +263,12 @@ async def continue_game(context: ContextTypes.DEFAULT_TYPE):
     
     # Người chơi tiếp theo
     mention = f"<a href='tg://user?id={current_player['id']}'>@{current_player['name']}</a>"
-    last_word = game.current_phrase.split()[-1]
     await context.bot.send_message(
         chat_id=context._chat_id,
-        text=f"🔗 Nối tiếp từ: '{last_word}'\n"
-             f"👤 Lượt của: {mention}\n"
-             f"⏰ Hạn: 59 giây",
+        text=f"🔄 Lượt chơi tiếp theo\n"
+             f"👉 Từ cần nối: 『{last_word}』\n"
+             f"👤 Người chơi: {mention}\n"
+             f"⏳ Thời gian: 59 giây",
         parse_mode="HTML"
     )
     await start_turn_timer(context)
