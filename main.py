@@ -2,7 +2,7 @@ import re
 import asyncio
 import random
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from telegram import Update
 from telegram.ext import (
     Application,
@@ -353,7 +353,7 @@ async def turn_timer(context: ContextTypes.DEFAULT_TYPE):
             return
         
         game.remove_player(current_player["id"])
-        mention = f"<a href='tg://user?id={current_player['id']}">@{current_player['name']}</a>"
+        mention = f"<a href='tg://user?id={current_player['id']}'>@{current_player['name']}</a>"
         
         await context.bot.send_message(
             chat_id=context._chat_id,
