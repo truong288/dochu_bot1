@@ -93,7 +93,7 @@ async def check_dictionary(word: str) -> Tuple[bool, Optional[str]]:
         
         if response.status_code == 200:
             data = response.json()
-            return (data.get("valid", True), None
+            return (data.get("valid", True), None)
         
         return False, "Không kết nối được từ điển"
         
