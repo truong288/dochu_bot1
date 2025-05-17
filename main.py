@@ -60,6 +60,7 @@ class GameManager:
         self.players = [p for p in self.players if p["id"] != user_id]
         if self.current_player_index >= len(self.players):
             self.current_player_index = 0
+        return len(self.players)  # Trả về số người chơi còn lại
 
 # ===== KHỞI TẠO =====
 game = GameManager()
@@ -130,7 +131,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🎮 Game Nối Chữ - Luật chơi:\n"
         "1. Mỗi người nhập cụm từ 2 từ\n"
         "2. Từ đầu phải nối với từ cuối của người trước\n"
-        "3. Không dùng từ cấm hoặc vô nghĩa\n\n"
+        "3. Không dùng từ cấm hoặc vô nghĩa\n"
+        "4. Thời gian mỗi lượt: 59 giây\n\n"
         "📝 Lệnh:\n"
         "/startgame - Bắt đầu game\n"
         "/join - Tham gia\n"
@@ -146,6 +148,7 @@ async def start_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🎉 Game đã được khởi tạo!\n"
         "👉 Gõ /join để tham gia\n"
+        "👉Gõ /begin - Bắt đầu khi đủ người\n"
         "👉 Gõ /botplay để thêm bot"
     )
 
@@ -202,7 +205,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if not is_valid:
         await update.message.reply_text(f"❌ Lỗi: {error}")
-        await eliminate_player(update, context)
+        remaining_players = await eliminate_player(update, context)
+        await notify_and_continue(remaining_players, context)
         return
     
     # Xử lý khi hợp lệ
@@ -213,12 +217,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:  # Các lượt tiếp theo
         if text.lower().split()[0] != game.current_phrase.split()[-1].lower():
             await update.message.reply_text("❌ Không đúng từ nối!")
-            await eliminate_player(update, context)
+            remaining_players = await eliminate_player(update, context)
+            await notify_and_continue(remaining_players, context)
             return
         
         if text.lower() in game.used_phrases:
             await update.message.reply_text("❌ Cụm từ đã được dùng!")
-            await eliminate_player(update, context)
+            remaining_players = await eliminate_player(update, context)
+            await notify_and_continue(remaining_players, context)
             return
         
         game.used_phrases[text.lower()] = 1
@@ -232,21 +238,36 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await end_game(context)
         return
     
-    # Xử lý lượt tiếp theo
-    next_player = game.players[game.current_player_index]
+    # Tiếp tục game
+    await continue_game(context)
+
+async def notify_and_continue(remaining_players: int, context: ContextTypes.DEFAULT_TYPE):
+    """Thông báo số người còn lại và tiếp tục game"""
+    if remaining_players == 1:
+        await end_game(context)
+    else:
+        await context.bot.send_message(
+            chat_id=context._chat_id,
+            text=f"👥 Số người chơi còn lại: {remaining_players}"
+        )
+        await continue_game(context)
+
+async def continue_game(context: ContextTypes.DEFAULT_TYPE):
+    """Tiếp tục game với người chơi hiện tại"""
+    current_player = game.players[game.current_player_index]
     
-    if next_player["id"] == 0:  # Bot chơi
+    if current_player["id"] == 0:  # Bot chơi
         await bot_turn(context)
         return
     
     # Người chơi tiếp theo
-    mention = f"<a href='tg://user?id={next_player['id']}'>@{next_player['name']}</a>"
+    mention = f"<a href='tg://user?id={current_player['id']}'>@{current_player['name']}</a>"
     last_word = game.current_phrase.split()[-1]
-    await update.message.reply_text(
-        f"✅ Đã cập nhật!\n"
-        f"👤 Lượt tiếp: {mention}\n"
-        f"🔗 Nối từ: '{last_word}'\n"
-        f"⏰ Hạn: 59 giây",
+    await context.bot.send_message(
+        chat_id=context._chat_id,
+        text=f"🔗 Nối tiếp từ: '{last_word}'\n"
+             f"👤 Lượt của: {mention}\n"
+             f"⏰ Hạn: 59 giây",
         parse_mode="HTML"
     )
     await start_turn_timer(context)
@@ -268,41 +289,24 @@ async def bot_turn(context: ContextTypes.DEFAULT_TYPE):
         text=f"🤖 Bot nối: '{bot_phrase}'"
     )
     
-    # Chuyển lượt tiếp theo
+    # Kiểm tra kết thúc game
     if len(game.players) == 1:
         await end_game(context)
         return
     
-    next_player = game.players[game.current_player_index]
-    
-    if next_player["id"] == 0:  # Bot tiếp tục chơi
-        await asyncio.sleep(1)
-        await bot_turn(context)
-        return
-    
-    mention = f"<a href='tg://user?id={next_player['id']}'>@{next_player['name']}</a>"
-    await context.bot.send_message(
-        chat_id=context._chat_id,
-        text=f"👤 Lượt tiếp: {mention}\n"
-             f"🔗 Nối từ: '{game.current_phrase.split()[-1]}'",
-        parse_mode="HTML"
-    )
-    await start_turn_timer(context)
+    # Tiếp tục game
+    await continue_game(context)
 
-async def eliminate_player(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Loại người chơi"""
+async def eliminate_player(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Loại người chơi và trả về số người còn lại"""
     user = update.effective_user
-    game.remove_player(user.id)
+    remaining_players = game.remove_player(user.id)
     
     await update.message.reply_text(
-        f"❌ {user.full_name} đã bị loại!\n"
-        f"👥 Còn lại: {len(game.players)} người"
+        f"❌ {user.full_name} đã bị loại!"
     )
     
-    if len(game.players) == 1:
-        await end_game(context)
-    else:
-        await begin_game(update, context)
+    return remaining_players
 
 async def end_game(context: ContextTypes.DEFAULT_TYPE):
     """Kết thúc game"""
@@ -352,7 +356,7 @@ async def turn_timer(context: ContextTypes.DEFAULT_TYPE):
         if current_player["id"] == 0:  # Bot không bị timeout
             return
         
-        game.remove_player(current_player["id"])
+        remaining_players = game.remove_player(current_player["id"])
         mention = f"<a href='tg://user?id={current_player['id']}'>@{current_player['name']}</a>"
         
         await context.bot.send_message(
@@ -361,10 +365,14 @@ async def turn_timer(context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML"
         )
         
-        if len(game.players) == 1:
+        if remaining_players == 1:
             await end_game(context)
         else:
-            await begin_game(None, context)
+            await context.bot.send_message(
+                chat_id=context._chat_id,
+                text=f"👥 Số người chơi còn lại: {remaining_players}"
+            )
+            await continue_game(context)
             
     except asyncio.CancelledError:
         pass
