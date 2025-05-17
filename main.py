@@ -203,20 +203,20 @@ def end_game(winner: dict):
 
 def main():
     updater = Updater("7995385268:AAEx4uelfTCYtzkze0vZ4G4eDaau_EfYnjw")
-    dispatcher = updater.dispatcher
+    dispatcher = dispatcher = application
 
     # Command handlers
-    dispatcher.add_handler(CommandHandler("start", start))
-    dispatcher.add_handler(CommandHandler("startgame", start_game))
-    dispatcher.add_handler(CommandHandler("join", join_game))
-    dispatcher.add_handler(CommandHandler("reset", reset_game))
-    dispatcher.add_handler(CommandHandler("begin", begin_game))
-    dispatcher.add_handler(CommandHandler("botplay", bot_play))
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("startgame", start_game))
+    application.add_handler(CommandHandler("join", join_game))
+    application.add_handler(CommandHandler("reset", reset_game))
+    application.add_handler(CommandHandler("begin", begin_game))
+    application.add_handler(CommandHandler("botplay", bot_play))
 
     # Message handler
     dispatcher.add_handler(MessageHandler(filters.text & ~filters.command, handle_message))
 
-    updater.start_polling()
+    application.run_polling()
     updater.idle()
 
 if __name__ == "__main__":
