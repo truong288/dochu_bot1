@@ -1,8 +1,9 @@
 import re
 import random
+from telegram.ext import filters
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
+from telegram.ext import Updater, CommandHandler, MessageHandler, filters, CallbackContext
 
 # Biến toàn cục lưu trạng thái game
 game_state = {
@@ -213,7 +214,7 @@ def main():
     dispatcher.add_handler(CommandHandler("botplay", bot_play))
 
     # Message handler
-    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
+    dispatcher.add_handler(MessageHandler(filters.text & ~filters.command, handle_message))
 
     updater.start_polling()
     updater.idle()
