@@ -7,7 +7,7 @@ import json
 import os
 from datetime import datetime
 import aiohttp
-
+import requests
 keep_alive()
 
 # Game state
@@ -72,6 +72,9 @@ async def check_word_in_dictionary(word):
                     data = await response.json()
                     return bool(data.get("meanings"))
                 return False
+    except Exception as e:
+        print(f"Dictionary API error: {e}")
+        return True
     except Exception as e:
         print(f"Dictionary API error: {e}")
         return True  # If API fails, assume word is valid to keep game going
